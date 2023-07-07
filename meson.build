@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 
 project('systemd', 'c',
-        version : '253',
+        version : '254',
         license : 'LGPLv2+',
         default_options: [
                 'c_std=gnu11',
@@ -13,8 +13,8 @@ project('systemd', 'c',
         meson_version : '>= 0.60.0',
        )
 
-libsystemd_version = '0.36.0'
-libudev_version = '1.7.6'
+libsystemd_version = '0.37.0'
+libudev_version = '1.7.7'
 
 conf = configuration_data()
 conf.set_quoted('PROJECT_URL', 'https://systemd.io/')
@@ -1189,8 +1189,13 @@ else
 endif
 conf.set10('HAVE_LIBFDISK', have)
 
+want_passwdqc = get_option('passwdqc')
 want_pwquality = get_option('pwquality')
-if want_pwquality != 'false' and not skip_deps
+if want_passwdqc == 'true' and want_pwquality == 'true'
+        error('passwdqc and pwquality cannot be requested simultaneously')
+endif
+
+if want_pwquality != 'false' and want_passwdqc != 'true' and not skip_deps
         libpwquality = dependency('pwquality',
                                   version : '>= 1.4.1',
                                   required : want_pwquality == 'true')
@@ -1200,6 +1205,16 @@ else
         libpwquality = []
 endif
 conf.set10('HAVE_PWQUALITY', have)
+
+if not have and want_passwdqc != 'false' and not skip_deps
+        libpasswdqc = dependency('passwdqc',
+                                 required : want_passwdqc == 'true')
+        have = libpasswdqc.found()
+else
+        have = false
+        libpasswdqc = []
+endif
+conf.set10('HAVE_PASSWDQC', have)
 
 want_seccomp = get_option('seccomp')
 if want_seccomp != 'false' and not skip_deps
@@ -4940,6 +4955,7 @@ foreach tuple : [
         ['microhttpd'],
         ['openssl'],
         ['p11kit'],
+        ['passwdqc'],
         ['pcre2'],
         ['pwquality'],
         ['qrencode'],

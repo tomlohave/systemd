@@ -294,6 +294,7 @@ usec_t service_restart_usec_next(Service *s) {
 
         if (n_restarts_next <= 1 ||
             s->restart_steps == 0 ||
+            s->restart_usec == 0 ||
             s->restart_max_delay_usec == USEC_INFINITY ||
             s->restart_usec >= s->restart_max_delay_usec)
                 value = s->restart_usec;
@@ -303,10 +304,15 @@ usec_t service_restart_usec_next(Service *s) {
                 /* Enforced in service_verify() and above */
                 assert(s->restart_max_delay_usec > s->restart_usec);
 
-                /* ((restart_max_delay_usec - restart_usec)^(1/restart_steps))^(n_restart_next - 1) */
-                value = usec_add(s->restart_usec,
-                                 (usec_t) powl(s->restart_max_delay_usec - s->restart_usec,
-                                               (long double) (n_restarts_next - 1) / s->restart_steps));
+                /* r_i / r_0 = (r_n / r_0) ^ (i / n)
+                 * where,
+                 *   r_0 : initial restart usec (s->restart_usec),
+                 *   r_i : i-th restart usec (value),
+                 *   r_n : maximum restart usec (s->restart_max_delay_usec),
+                 *   i : index of the next step (n_restarts_next - 1)
+                 *   n : num maximum steps (s->restart_steps) */
+                value = (usec_t) (s->restart_usec * powl((long double) s->restart_max_delay_usec / s->restart_usec,
+                                                         (long double) (n_restarts_next - 1) / s->restart_steps));
         }
 
         log_unit_debug(UNIT(s), "Next restart interval calculated as: %s", FORMAT_TIMESPAN(value, 0));
@@ -2005,7 +2011,8 @@ static void service_enter_dead(Service *s, ServiceResult f, bool allow_restart) 
                  * are only transitionary and followed by an automatic restart. We have fine-grained
                  * low-level states for this though so that software can distinguish the permanent UNIT_INACTIVE
                  * state from this transitionary UNIT_INACTIVE state by looking at the low-level states. */
-                service_set_state(s, restart_state);
+                if (s->restart_mode != SERVICE_RESTART_MODE_DIRECT)
+                        service_set_state(s, restart_state);
 
                 r = service_arm_timer(s, /* relative= */ true, service_restart_usec_next(s));
                 if (r < 0)
@@ -5002,6 +5009,13 @@ static const char* const service_restart_table[_SERVICE_RESTART_MAX] = {
 };
 
 DEFINE_STRING_TABLE_LOOKUP(service_restart, ServiceRestart);
+
+static const char* const service_restart_mode_table[_SERVICE_RESTART_MODE_MAX] = {
+        [SERVICE_RESTART_MODE_NORMAL] = "normal",
+        [SERVICE_RESTART_MODE_DIRECT]  = "direct",
+};
+
+DEFINE_STRING_TABLE_LOOKUP(service_restart_mode, ServiceRestartMode);
 
 static const char* const service_type_table[_SERVICE_TYPE_MAX] = {
         [SERVICE_SIMPLE]        = "simple",

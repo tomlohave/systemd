@@ -4,13 +4,6 @@ CHANGES WITH 254 in spe:
 
         Announcements of Future Feature Removals and Incompatible Changes:
 
-        * We intend to remove cgroup v1 support from a systemd release after
-          the end of 2023. If you run services that make explicit use of
-          cgroup v1 features (i.e. the "legacy hierarchy" with separate
-          hierarchies for each controller), please implement compatibility with
-          cgroup v2 (i.e. the "unified hierarchy") sooner rather than later.
-          Most of Linux userspace has been ported over already.
-
         * The next release (v255) will remove support for split-usr (/usr/
           mounted separately during late boot, instead of being mounted by the
           initrd before switching to the rootfs) and unmerged-usr (parallel
@@ -18,14 +11,21 @@ CHANGES WITH 254 in spe:
           details, see:
           https://lists.freedesktop.org/archives/systemd-devel/2022-September/048352.html
 
-        * EnvironmentFile= now treats the line following a comment line
-          trailing with escape as a non comment line. For details, see:
-          https://github.com/systemd/systemd/issues/27975
+        * We intend to remove cgroup v1 support from a systemd release after
+          the end of 2023. If you run services that make explicit use of
+          cgroup v1 features (i.e. the "legacy hierarchy" with separate
+          hierarchies for each controller), please implement compatibility with
+          cgroup v2 (i.e. the "unified hierarchy") sooner rather than later.
+          Most of Linux userspace has been ported over already.
 
         * Support for System V service scripts is now deprecated and will be
           removed in a future release. Please make sure to update your software
           *now* to include a native systemd unit file instead of a legacy
           System V script to retain compatibility with future systemd releases.
+
+        * EnvironmentFile= now treats the line following a comment line
+          trailing with escape as a non comment line. For details, see:
+          https://github.com/systemd/systemd/issues/27975
 
         * Behaviour of sandboxing options for the per-user service manager
           units has changed. They now imply PrivateUsers=yes, which means user
@@ -105,6 +105,13 @@ CHANGES WITH 254 in spe:
           RestartMaxDelaySec= which allow exponentially-growing restart
           intervals for Restart=.
 
+        * The service activation logic gained a new setting RestartMode= which
+          can be set to 'direct' to skip the inactive/failed states when
+          restarting, so that dependent units are not notified until the service
+          converges to a final (successful or failed) state. For example, this
+          means that OnSuccess=/OnFailure= units will not be triggered until the
+          service state has converged.
+
         * PID 1 will now automatically load the virtio_console kernel module
           during early initialization if running in a suitable VM. This is done
           so that early-boot logging can be written to the console if available.
@@ -183,6 +190,55 @@ CHANGES WITH 254 in spe:
           LoadCredential= and LoadCredentialEncrypted= and searches for
           credentials to import from the system, and supports globbing.
 
+        * A new job mode "restart-dependencies" has been added to the service
+          manager (exposed via systemctl --job-mode=). It is only valid when
+          used with "start" jobs, and has the effect that the "start" job will
+          be propagated as "restart" jobs to currently running units that have
+          a BindsTo= or Requires= dependency on the started unit.
+
+        * A new verb "whoami" has been added to "systemctl" which determines as
+          part of which unit the command is being invoked. It writes the unit
+          name to standard output. If one or more PIDs are specified reports
+          the unit names the processes referenced by the PIDs belong to.
+
+        * The system and service credential logic has been improved: there's
+          now a clearly defined place where system provisioning tools running
+          in the initrd can place credentials that will be imported into the
+          system's set of credentials during the initrd → host transition: the
+          /run/credentials/@initrd/ directory. Once the credentials placed
+          there are imported into the system credential set they are deleted
+          from this directory, and the directory itself is deleted afterwards
+          too.
+
+        * A new kernel command line option systemd.set_credential_binary= has
+          been added, that is similar to the pre-existing
+          systemd.set_credential= but accepts arbitrary binary credential data,
+          encoded in Base64. Note that the kernel command line is not a
+          recommend way to transfer credentials into a system, since it is
+          world-readable from userspace.
+
+        * The default machine ID to use may now be configured via the
+          system.machine_id system credential. It will only be used if no
+          machine ID was set yet on the host.
+
+        * On Linux kernel 6.4 and newer system and service credentials will now
+          be placed in a tmpfs instance that has the "noswap" mount option
+          set. Previously, a "ramfs" instance was used. By switching to tmpfs
+          ACL support and overall size limits can now be enforced, without
+          compromising on security, as the memory is never paged out either
+          way.
+
+        * The service manager now can detect when it is running in a
+          'Confidential Virtual Machine', and a corresponding 'cvm' value is now
+          accepted by ConditionSecurity= for units that want to conditionalize
+          themselves on this. systemd-detect-virt gained new 'cvm' and
+          '--list-cvm' switches to respectively perform the detection or list
+          all known flavours of confidential VM, depending on the vendor. The
+          manager will publish a 'ConfidentialVirtualization' D-Bus property,
+          and will also set a SYSTEMD_CONFIDENTIAL_VIRTUALIZATION= environment
+          variable for unit generators. Finally, udev rules can match on a new
+          'cvm' key that will be set when in a confidential VM.
+
         Journal:
 
         * The sd-journal API gained a new call sd_journal_get_seqnum() to
@@ -194,6 +250,9 @@ CHANGES WITH 254 in spe:
         * journalctl gained a new switch --truncate-newline. If specified
           multi-line log records will be truncated at the first newline,
           i.e. only the first line of each log message will be shown.
+
+        * systemd-journal-upload gained support for --namespace=, similar to
+          the switch of the same name of journalctl.
 
         systemd-repart:
 
@@ -259,6 +318,11 @@ CHANGES WITH 254 in spe:
         * ukify gained a new "genkey" verb for generating a set of of key pairs
           to sign UKIs and their PCR data with.
 
+        * ukify now accepts SBAT information to place in the .sbat PE section
+          of UKIs and addons. If a UKI is built the SBAT information from the
+          inner kernel is merged with any SBAT information associated with
+          systemd-stub and the SBAT data specified on the ukify command line.
+
         * The kernel-install script has been rewritten in C, and reuses much of
           the infrastructure of existing tools such as bootctl. It also gained
           --esp-path= and --boot-path= options to override the path to the ESP,
@@ -267,7 +331,7 @@ CHANGES WITH 254 in spe:
           of the same name.
 
         * A new kernel-install plugin 60-ukify has been added which will
-          combine kernel/initrd locally into an UKI and optionally sign them
+          combine kernel/initrd locally into a UKI and optionally sign them
           with a local key. This may be used to switch to UKI mode even on
           systems where a local kernel or initrd is used. (Typically UKIs are
           built and signed by the vendor.)
@@ -394,10 +458,30 @@ CHANGES WITH 254 in spe:
           superficially validate DDI structure, and check whether a specific
           image policy allows the DDI.
 
+        * systemd-dissect gained support for a new --mtree-hash switch to
+          optionally disable calculating mtree hashes, which can be slow on
+          large images.
+
+        * systemd-dissect --copy-to, --copy-from, --list and --mtree switches
+          are now able to operate on directories too, other than images.
+
         Network Management:
 
         * networkd's GENEVE support as gained a new .network option
           InheritInnerProtocol=.
+
+        * The [Tunnel] section in .netdev files has gained a new setting
+          IgnoreDontFragment for controlling the IPv4 "DF" flag of datagrams.
+
+        * A new global IPv6PrivacyExtensions= setting has been added that
+          selects the default value of the per-network setting of the same
+          name.
+
+        * The predictable network interface naming logic will now include
+          SR-IOV-R "representor" information in network interface names.
+
+        * The DHCPv4 + DHCPv6 + IPv6 RA logic in networkd gained support for
+          the RFC8910 captive portal option.
 
         Device Management:
 
@@ -531,6 +615,7 @@ CHANGES WITH 254 in spe:
 
           https://systemd.io/COREDUMP
           https://systemd.io/MEMORY_PRESSURE
+          smbios-type-11(7)
 
         * systemd-firstboot gained a new --reset option. If specified, the
           settings in /etc/ it knows how to initialize are reset.
@@ -568,7 +653,14 @@ CHANGES WITH 254 in spe:
 
         * systemd-fstab-generator now understands two new kernel command line
           options systemd.mount-extra= and systemd.swap-extra=, which configure
-          additional mounts or swaps in a format similar to /etc/fstab.
+          additional mounts or swaps in a format similar to /etc/fstab. It also
+          now supports the new fstab.extra and fstab.extra.initrd credentials
+          that may contain additional /etc/fstab lines to apply at boot.
+
+        * systemd-getty-generator now understands two new credentials
+          getty.ttys.container and getty.ttys.serial. These credentials may
+          contain a list of TTY devices – one per line – to instantiate
+          container-getty@.service and serial-getty@.service on.
 
         * systemd-sysupdate's sysupdate.d/ drop-ins gained a new setting
           PathRelativeTo=, which can be set to "esp", "xbootldr", "boot", in
@@ -601,6 +693,56 @@ CHANGES WITH 254 in spe:
           user is notified (graphically via Plymouth – if available – as well
           as in text form on the console), and the system is turned off after a
           10s delay.
+
+        * The 'passwdqc' library is now supported as an alternative to the
+          'pwquality' library and it can be selected at build time.
+
+        Contributions from: 김인수, 07416, Addison Snelling, Adrian Vovk,
+        Aidan Dang, Alexander Krabler, Alfred Klomp, Anatoli Babenia,
+        Andrei Stepanov, Andrew Baxter, Antonio Alvarez Feijoo,
+        Arian van Putten, Arthur Shau, A S Alam,
+        Asier Sarasua Garmendia, Balló György, Bastien Nocera,
+        Benjamin Herrenschmidt, Benjamin Raison, Bill Peterson,
+        Brad Fitzpatrick, Brett Holman, bri, Chen Qi, Chitoku,
+        Christoph Anton Mitterer, Christopher Gurnee, Colin Walters,
+        Cornelius Hoffmann, Cristian Rodríguez, cunshunxia, cvlc12,
+        Cyril Roelandt, Daan De Meyer, Daniele Medri,
+        Daniel P. Berrangé, Dan Streetman, David Edmundson,
+        David Schroeder, David Tardon, dependabot[bot],
+        Dimitri John Ledkov, Dmitrii Fomchenkov, Dmitry V. Levin, dmkUK,
+        Dominique Martinet, don bright, drosdeck, Edson Juliano Drosdeck,
+        Egor Ignatov, EinBaum, Emanuele Giuseppe Esposito, Eric Curtin,
+        Evgeny Vereshchagin, Florian Klink, Franck Bui, François Rigault,
+        Fran Diéguez, Franklin Yu, Frantisek Sumsal, Gaël PORTAY,
+        Gerd Hoffmann, Gertalitec, Gibeom Gwon, Gustavo Noronha Silva,
+        Hannu Lounento, Hans de Goede, Haochen Tong, HATAYAMA Daisuke,
+        Henrik Holst, Hoe Hao Cheng, Igor Tsiglyar, Ivan Vecera,
+        James Hilliard, Jan Engelhardt, Jan Janssen, Jan Luebbe,
+        Jan Macku, Janne Sirén, jcg, Jeidnx, Joan Bruguera,
+        Joerg Behrmann, jonathanmetzman, Jordan Rome, Josef Miegl,
+        Joshua Goins, Joyce, Joyce Brum, Juno Computers, Kai Lueke,
+        Kevin P. Fleming, Kiran Vemula, Klaus, Klaus Zipfel,
+        Lawrence Thorpe, Lennart Poettering, licunlong, Lily Foster,
+        Luca Boccassi, Ludwig Nussel, maanyagoenka, Maksim Kliazovich,
+        Malte Poll, Marko Korhonen, Masatake YAMATO, Mateusz Poliwczak,
+        Matt Johnston, Miao Wang, Michal Koutný, Michal Sekletár,
+        Mike Yuan, mooo, Morten Linderud, msizanoen, Nick Rosbrook, nikstur,
+        Olivier Gayot, Omojola Joshua, Paolo Velati, Paul Barker,
+        Philipp Kern, Philip Withnall, Piotr Drąg, Quintin Hill,
+        Rene Hollander, Richard Phibel, Robert Meijers, Robert Scheck,
+        Romain Geissler, Ronan Pigott, Russell Harmon, saikat0511,
+        Samanta Navarro, Sam James, Sam Morris, Simon Braunschmidt,
+        Sjoerd Simons, Sorah Fukumori, Stanislaw Gruszka, Stefan Roesch,
+        Steven Luo, Steve Ramage, taniishkaaa, Tanishka, Thierry Martin,
+        Thomas Blume, Thomas Genty, Thomas Weißschuh, Thorsten Kukuk,
+        Times-Z, Tobias Powalowski, tofylion, Topi Miettinen,
+        Uwe Kleine-König, Velislav Ivanov, Vitaly Kuznetsov, Vít Zikmund,
+        Will Fancher, William Roberts, Winterhuman, Wolfgang Müller,
+        Xiaotian Wu, Xi Ruoyao, Yu Watanabe, Yuxiang Zhu,
+        Zbigniew Jędrzejewski-Szmek, zhmylove, ZjYwMj,
+        Дамјан Георгиевски, наб
+
+        — Edinburgh, 2023-07-06
 
 CHANGES WITH 253:
 
@@ -3603,7 +3745,7 @@ CHANGES WITH 249:
 
         * A new ConditionFirmware= setting has been added to unit files to
           conditionalize on certain firmware features. At the moment it may
-          check whether running on an UEFI system, a device.tree system, or if
+          check whether running on a UEFI system, a device.tree system, or if
           the system is compatible with some specified device-tree feature.
 
         * A new ConditionOSRelease= setting has been added to unit files to
@@ -5389,7 +5531,7 @@ CHANGES WITH 246:
           implementations.
 
         * journalctl will now include a clickable link in the default output for
-          each log message for which an URL with further documentation is
+          each log message for which a URL with further documentation is
           known. This is only supported on terminal emulators that support
           clickable hyperlinks, and is turned off if a pager is used (since
           "less" still doesn't support hyperlinks,
@@ -11752,7 +11894,7 @@ CHANGES WITH 219:
           triggering automatic unmounting when devices become
           unavailable. With this in place systemd will now
           automatically unmount left-over mounts when a CD-ROM is
-          ejected or an USB stick is yanked from the system.
+          ejected or a USB stick is yanked from the system.
 
         * networkd-wait-online now has support for waiting for
           specific interfaces only (with globbing), and for giving up

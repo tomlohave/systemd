@@ -357,17 +357,12 @@ def create_unit_dropin(unit, contents):
     with open(f'/run/systemd/system/{unit}.d/00-override.conf', mode='w', encoding='utf-8') as f:
         f.write('\n'.join(contents))
 
-def create_service_dropin(service, command, reload_command=None, additional_settings=None):
+def create_service_dropin(service, command, additional_settings=None):
     drop_in = [
         '[Service]',
         'ExecStart=',
         f'ExecStart=!!{valgrind_cmd}{command}',
     ]
-    if reload_command:
-        drop_in += [
-            'ExecReload=',
-            f'ExecReload={valgrind_cmd}{reload_command}',
-        ]
     if enable_debug:
         drop_in += ['Environment=SYSTEMD_LOG_LEVEL=debug']
     if asan_options:
@@ -688,7 +683,6 @@ def setUpModule():
     save_timezone()
 
     create_service_dropin('systemd-networkd', networkd_bin,
-                          f'{networkctl_bin} reload',
                           ['[Service]', 'Restart=no', '[Unit]', 'StartLimitIntervalSec=0'])
     create_service_dropin('systemd-resolved', resolved_bin)
     create_service_dropin('systemd-timesyncd', timesyncd_bin)
@@ -702,8 +696,6 @@ def setUpModule():
             '[Service]',
             'ExecStart=',
             f'ExecStart=!!{udevd_bin}',
-            'ExecReload=',
-            f'ExecReload={udevadm_bin} control --reload --timeout 0',
         ]
     )
     create_unit_dropin(
@@ -4837,7 +4829,7 @@ class NetworkdDHCPClientTests(unittest.TestCase, Utilities):
         ]
         if classless:
             additional_options += [
-                '--dhcp-option=option:classless-static-route,0.0.0.0/0,192.168.5.4,8.0.0.0/8,192.168.5.5'
+                '--dhcp-option=option:classless-static-route,0.0.0.0/0,192.168.5.4,8.0.0.0/8,192.168.5.5,192.168.5.64/26,192.168.5.5'
             ]
         start_dnsmasq(*additional_options)
         self.wait_online(['veth99:routable', 'veth-peer:routable'])
@@ -4850,6 +4842,7 @@ class NetworkdDHCPClientTests(unittest.TestCase, Utilities):
             if classless:
                 self.assertRegex(output, r'default via 192.168.5.4 proto dhcp src 192.168.5.[0-9]* metric 1024')
                 self.assertRegex(output, r'8.0.0.0/8 via 192.168.5.5 proto dhcp src 192.168.5.[0-9]* metric 1024')
+                self.assertRegex(output, r'192.168.5.64/26 via 192.168.5.5 proto dhcp src 192.168.5.[0-9]* metric 1024')
                 self.assertRegex(output, r'192.168.5.4 proto dhcp scope link src 192.168.5.[0-9]* metric 1024')
                 self.assertRegex(output, r'192.168.5.5 proto dhcp scope link src 192.168.5.[0-9]* metric 1024')
             else:

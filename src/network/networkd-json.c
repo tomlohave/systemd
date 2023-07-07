@@ -7,6 +7,7 @@
 #include "ip-protocol-list.h"
 #include "netif-util.h"
 #include "networkd-address.h"
+#include "networkd-dhcp-common.h"
 #include "networkd-json.h"
 #include "networkd-link.h"
 #include "networkd-manager.h"
@@ -51,8 +52,10 @@ static int address_build_json(Address *address, JsonVariant **ret) {
                                 JSON_BUILD_PAIR_UNSIGNED("Flags", address->flags),
                                 JSON_BUILD_PAIR_STRING("FlagsString", flags),
                                 JSON_BUILD_PAIR_STRING_NON_EMPTY("Label", address->label),
-                                JSON_BUILD_PAIR_FINITE_USEC("PreferredLifetimeUsec", address->lifetime_preferred_usec),
-                                JSON_BUILD_PAIR_FINITE_USEC("ValidLifetimeUsec", address->lifetime_valid_usec),
+                                JSON_BUILD_PAIR_FINITE_USEC("PreferredLifetimeUSec", address->lifetime_preferred_usec),
+                                JSON_BUILD_PAIR_FINITE_USEC("PreferredLifetimeUsec", address->lifetime_preferred_usec), /* for backward compat */
+                                JSON_BUILD_PAIR_FINITE_USEC("ValidLifetimeUSec", address->lifetime_valid_usec),
+                                JSON_BUILD_PAIR_FINITE_USEC("ValidLifetimeUsec", address->lifetime_valid_usec), /* for backward compat */
                                 JSON_BUILD_PAIR_STRING("ConfigSource", network_config_source_to_string(address->source)),
                                 JSON_BUILD_PAIR_STRING("ConfigState", state),
                                 JSON_BUILD_PAIR_IN_ADDR_NON_NULL("ConfigProvider", &address->provider, address->family)));
@@ -874,31 +877,15 @@ finalize:
 }
 
 static int captive_portal_build_json(Link *link, JsonVariant **ret) {
+        const char *captive_portal;
         int r;
-        const char *captive_portal = NULL;
 
         assert(link);
         assert(ret);
 
-        if (!link->network) {
-                *ret = NULL;
-                return 0;
-        }
-
-        if (link->network->dhcp_use_captive_portal && link->dhcp_lease) {
-                r = sd_dhcp_lease_get_captive_portal(link->dhcp_lease, &captive_portal);
-                if (r < 0 && r != -ENODATA)
-                        return r;
-        }
-
-        if (link->network->dhcp6_use_captive_portal && link->dhcp6_lease && !captive_portal) {
-                r = sd_dhcp6_lease_get_captive_portal(link->dhcp6_lease, &captive_portal);
-                if (r < 0 && r != -ENODATA)
-                        return r;
-        }
-
-        if (link->network->ipv6_accept_ra_use_captive_portal && !captive_portal)
-                captive_portal = link->ndisc_captive_portal;
+        r = link_get_captive_portal(link, &captive_portal);
+        if (r < 0)
+                return r;
 
         if (!captive_portal) {
                 *ret = NULL;
